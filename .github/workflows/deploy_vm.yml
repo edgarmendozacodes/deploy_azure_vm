@@ -67,19 +67,19 @@ jobs:
           --destination-address-prefixes '*' \
           --description "Allow inbound traffic on port 22 for SSH"
 
-# Step 6: Create virtual network 
-- name: Create virtual network and subnet if they don't exist
-  run: |
-    if ! az network vnet show --resource-group jenkinsRG --name jenkinsVNet > /dev/null 2>&1; then
-      az network vnet create \
-        --resource-group jenkinsRG \
-        --name jenkinsVNet \
-        --address-prefix 10.0.0.0/16 \
-        --subnet-name jenkinsSubnet \
-        --subnet-prefix 10.0.1.0/24
-    else
-      echo "Virtual Network jenkinsVNet already exists. Skipping creation."
-    fi
+# Step 6: Create virtual network and subnet if they don't exist
+      - name: Create virtual network and subnet if they don't exist
+        run: |
+          if ! az network vnet show --resource-group jenkinsRG --name jenkinsVNet > /dev/null 2>&1; then
+            az network vnet create \
+              --resource-group jenkinsRG \
+              --name jenkinsVNet \
+              --address-prefix 10.0.0.0/16 \
+              --subnet-name jenkinsSubnet \
+              --subnet-prefix 10.0.1.0/24
+          else
+            echo "Virtual Network jenkinsVNet already exists. Skipping creation."
+          fi
 
 # Step 7: Create public IP if it doesn't exist
 - name: Create public IP if it doesn't exist
