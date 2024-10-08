@@ -1,0 +1,30 @@
+name: Deploy VM to Azure
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-vm:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Step 1: Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Step 2: Login to Azure using credentials stored in GitHub Secrets
+    - name: Login to Azure using credentials
+      uses: azure/login@v1.5.0
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    # Step 3: Create the resource group if it doesn't exist
+    - name: Create resource group if it doesn't exist
+      run: |
+        if ! az group show --name jenkinsRG > /dev/null 2>&1; then
+          az group create --name jenkinsRG --location eastus
+        else
+          echo "Resource group jenkinsRG already exists. Skipping creation."
+        fi
