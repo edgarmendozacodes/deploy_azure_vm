@@ -1,0 +1,248 @@
+name: Deploy VM to Azure
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  RESOURCE_GROUP: edgarRG
+  LOCATION: eastus
+  NSG_NAME: jenkinsNSG
+  VNET_NAME: jenkinsVNet
+  SUBNET_NAME: jenkinsSubnet
+  PUBLIC_IP_NAME: jenkinsPublicIP
+  NIC_NAME: jenkinsNIC
+  VM_NAME: jenkinsVM
+  ADMIN_USERNAME: ${{ secrets.VM_USERNAME }}
+
+jobs:
+  deploy-vm:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Step 1: Checkout the repository
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Step 2: Login to Azure using credentials stored in GitHub Secrets
+    - name: Login to Azure using credentials
+      uses: azure/login@v1.5.0
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    # Step 3: Create the resource group if it doesn't exist
+    - name: Create resource group if it doesn't exist
+      run: |
+        if ! az group show --name $RESOURCE_GROUP > /dev/null 2>&1; then
+          az group create --name $RESOURCE_GROUP --location $LOCATION
+        else
+          echo "Resource group $RESOURCE_GROUP already exists. Skipping creation."
+        fi
+
+    # Step 4: Create Network Security Group (NSG) if it doesn't exist
+    - name: Create Network Security Group (NSG) if it doesn't exist
+      run: |
+        if ! az network nsg show --resource-group $RESOURCE_GROUP --name $NSG_NAME > /dev/null 2>&1; then
+          az network nsg create --resource-group $RESOURCE_GROUP --name $NSG_NAME
+        else
+          echo "Network Security Group $NSG_NAME already exists. Skipping creation."
+        fi
+
+    # Step 5: Create NSG rules to allow Jenkins (port 8080) and SSH (port 22) traffic
+    - name: Create NSG rules for Jenkins and SSH
+      run: |
+        # Allow Jenkins
+        az network nsg rule create \
+          --resource-group $RESOURCE_GROUP \
+          --nsg-name $NSG_NAME \
+          --name AllowJenkins \
+          --protocol tcp \
+          --priority 1000 \
+          --destination-port-ranges 8080 \
+          --access allow \
+          --direction inbound \
+          --source-address-prefixes '*' \
+          --description "Allow inbound traffic on port 8080 for Jenkins"
+
+        # Allow SSH
+        az network nsg rule create \
+          --resource-group $RESOURCE_GROUP \
+          --nsg-name $NSG_NAME \
+          --name AllowSSH \
+          --protocol tcp \
+          --priority 1001 \
+          --destination-port-ranges 22 \
+          --access allow \
+          --direction inbound \
+          --source-address-prefixes '*' \
+          --description "Allow inbound traffic on port 22 for SSH"
+
+    # Step 6: Create virtual network and subnet if they don't exist
+    - name: Create virtual network and subnet if they don't exist
+      run: |
+        if ! az network vnet show --resource-group $RESOURCE_GROUP --name $VNET_NAME > /dev/null 2>&1; then
+          az network vnet create \
+            --resource-group $RESOURCE_GROUP \
+            --name $VNET_NAME \
+            --address-prefix 10.0.0.0/16 \
+            --subnet-name $SUBNET_NAME \
+            --subnet-prefix 10.0.1.0/24
+        else
+          echo "Virtual Network $VNET_NAME already exists. Skipping creation."
+        fi
+
+    # Step 7: Create public IP if it doesn't exist
+    - name: Create public IP if it doesn't exist
+      run: |
+        if ! az network public-ip show --resource-group $RESOURCE_GROUP --name $PUBLIC_IP_NAME > /dev/null 2>&1; then
+          az network public-ip create \
+            --resource-group $RESOURCE_GROUP \
+            --name $PUBLIC_IP_NAME
+        else
+          echo "Public IP $PUBLIC_IP_NAME already exists. Skipping creation."
+        fi
+
+    # Step 8: Create network interface if it doesn't exist
+    - name: Create network interface if it doesn't exist
+      run: |
+        if ! az network nic show --resource-group $RESOURCE_GROUP --name $NIC_NAME > /dev/null 2>&1; then
+          az network nic create \
+            --resource-group $RESOURCE_GROUP \
+            --vnet-name $VNET_NAME \
+            --subnet $SUBNET_NAME \
+            --name $NIC_NAME \
+            --public-ip-address $PUBLIC_IP_NAME \
+            --network-security-group $NSG_NAME
+        else
+          echo "Network interface $NIC_NAME already exists. Skipping creation."
+        fi
+
+    # Step 9: Set up SSH keys
+    - name: Set up SSH keys
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        echo "${{ secrets.SSH_PUBLIC_KEY }}" > ~/.ssh/id_rsa.pub
+        chmod 600 ~/.ssh/id_rsa
+        chmod 644 ~/.ssh/id_rsa.pub
+
+    # Step 10: Debug - Output VM username
+    - name: Debug - Output VM username
+      run: echo "The admin username is ${{ secrets.VM_USERNAME }}"
+
+    # Step 11: Deploy the VM with SSH key if it doesn't exist
+    - name: Deploy VM with SSH key if it doesn't exist
+      run: |
+        if ! az vm show --resource-group $RESOURCE_GROUP --name $VM_NAME > /dev/null 2>&1; then
+          az vm create \
+            --resource-group $RESOURCE_GROUP \
+            --name $VM_NAME \
+            --nics $NIC_NAME \
+            --image Canonical:UbuntuServer:22_04-lts:latest \
+            --size Standard_DS1_v2 \
+            --admin-username $ADMIN_USERNAME \
+            --ssh-key-value ~/.ssh/id_rsa.pub
+        else
+          echo "VM $VM_NAME already exists. Skipping creation."
+        fi
+
+    # Step 12: Output public IP of the VM
+    - name: Output public IP of the VM
+      run: |
+        VM_IP=$(az vm show -d -g $RESOURCE_GROUP -n $VM_NAME --query publicIps -o tsv)
+        echo "VM_IP=$VM_IP" >> $GITHUB_ENV
+
+    # Step 13: Set up sudo privileges
+    - name: Set up sudo privileges
+      run: |
+        az vm run-command invoke \
+          --resource-group $RESOURCE_GROUP \
+          --name $VM_NAME \
+          --command-id RunShellScript \
+          --scripts " 
+            if [ ! -f /etc/sudoers.d/$ADMIN_USERNAME ]; then 
+              echo \"$ADMIN_USERNAME ALL=(ALL) NOPASSWD:ALL\" | sudo tee /etc/sudoers.d/$ADMIN_USERNAME > /dev/null 
+              echo \"Sudo privileges configured for $ADMIN_USERNAME\" 
+            else 
+              echo \"Sudo privileges already configured for $ADMIN_USERNAME. Skipping.\" 
+            fi 
+          "
+
+    # Step 14: Install Jenkins on the VM
+    - name: Install Jenkins on the VM
+      run: |
+        az vm run-command invoke \
+          --resource-group $RESOURCE_GROUP \
+          --name $VM_NAME \
+          --command-id RunShellScript \
+          --scripts " 
+            if ! dpkg -l | grep -qw jenkins; then 
+              echo \"Starting Jenkins installation process...\" 
+              sudo apt-get update -y 
+              sudo apt-get upgrade -y 
+              sudo apt-get install -y openjdk-11-jdk 
+              curl -fsSL https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null 
+              echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null 
+              sudo apt-get update -y 
+              sudo apt-get install -y jenkins 
+              sudo systemctl start jenkins 
+              sudo systemctl enable jenkins 
+              sudo systemctl status jenkins 
+              echo \"Jenkins installed and started successfully.\" 
+            else 
+              echo \"Jenkins is already installed. Skipping installation.\" 
+            fi 
+          "
+
+    # Step 15: Output Jenkins URL
+    - name: Output Jenkins URL
+      run: |
+        echo "Jenkins is accessible at: http://$VM_IP:8080"
+
+    # Step 16: Check Jenkins Service Status and Logs
+    - name: Check Jenkins Service Status
+      run: |
+        az vm run-command invoke \
+          --resource-group $RESOURCE_GROUP \
+          --name $VM_NAME \
+          --command-id RunShellScript \
+          --scripts " 
+            sudo systemctl status jenkins 
+            sudo journalctl -u jenkins 
+          "
+
+    # Step 17: Verify Jenkins Bound to Port 8080
+    - name: Verify Jenkins Bound to Port 8080
+      run: |
+        az vm run-command invoke \
+          --resource-group $RESOURCE_GROUP \
+          --name $VM_NAME \
+          --command-id RunShellScript \
+          --scripts "sudo ss -tuln | grep 8080"
+
+    # Step 18: Check NSG Rules
+    - name: Check NSG Rules
+      run: az network nic list-effective-nsg --resource-group $RESOURCE_GROUP --name $NIC_NAME
+
+    # Step 19: Check Firewall on VM
+    - name: Check Firewall on VM
+      run: |
+        az vm run-command invoke \
+          --resource-group $RESOURCE_GROUP \
+          --name $VM_NAME \
+          --command-id RunShellScript \
+          --scripts " 
+            sudo ufw status 
+            sudo ufw allow 8080 
+            sudo ufw reload 
+          "
+
+    # Step 20: Test Jenkins Locally on VM
+    - name: Test Jenkins Locally
+      run: |
+        az vm run-command invoke \
+          --resource-group $RESOURCE_GROUP \
+          --name $VM_NAME \
+          --command-id RunShellScript \
+          --scripts "curl http://localhost:8080"
