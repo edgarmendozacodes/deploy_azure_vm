@@ -173,3 +173,218 @@ jobs:
               echo "Sudo privileges already configured for ${{ secrets.VM_USERNAME }}. Skipping."
             fi
           '
+    # Step 13: Install Jenkins on the VM (Skip if already installed) 
+
+    - name: Install Jenkins on the VM 
+
+      run: | 
+
+        az vm run-command invoke \ 
+
+          --resource-group jenkinsRG \ 
+
+          --name jenkinsVM \ 
+
+          --command-id RunShellScript \ 
+
+          --scripts ' 
+
+            # Check if Jenkins is already installed 
+
+            if ! systemctl is-active --quiet jenkins; then 
+
+              echo "Starting Jenkins installation process..." 
+
+ 
+
+              # 1. Update system 
+
+              echo "Updating system..." 
+
+              sudo apt-get update -y 
+
+              sudo apt-get upgrade -y 
+
+ 
+
+              # 2. Install Java (OpenJDK 11) 
+
+              echo "Installing Java (OpenJDK 11)..." 
+
+              sudo apt-get install -y openjdk-11-jdk 
+
+ 
+
+              # 3. Add Jenkins GPG key and repository 
+
+              echo "Adding Jenkins GPG key and repository..." 
+
+              curl -fsSL https://pkg.jenkins.io/debian/jenkins.io.key | sudo tee /usr/share/keyrings/jenkins-keyring.asc > /dev/null 
+
+              echo deb [signed-by=/usr/share/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/ | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null 
+
+ 
+
+              # 4. Fix GPG key issue by adding the key manually (if needed) 
+
+              echo "Adding Jenkins GPG key manually as a fallback..." 
+
+              sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 5BA31D57EF5975CA 
+
+ 
+
+              # 5. Add the Jenkins repository (fallback method) 
+
+              echo "Adding the Jenkins repository manually (fallback)..." 
+
+              sudo sh -c "echo deb https://pkg.jenkins.io/debian-stable binary/ > /etc/apt/sources.list.d/jenkins.list" 
+
+ 
+
+              # 6. Update the package list again after adding Jenkins repository 
+
+              echo "Updating package list again..." 
+
+              sudo apt-get update -y 
+
+ 
+
+              # 7. Install Jenkins 
+
+              echo "Installing Jenkins..." 
+
+              sudo apt-get install -y jenkins 
+
+ 
+
+              # 8. Start and enable Jenkins 
+
+              echo "Starting and enabling Jenkins service..." 
+
+              sudo systemctl start jenkins 
+
+              sudo systemctl enable jenkins 
+
+ 
+
+              # 9. Verify Jenkins installation 
+
+              echo "Verifying Jenkins status..." 
+
+              sudo systemctl status jenkins 
+
+ 
+
+              echo "Jenkins installed and started successfully." 
+
+            else 
+
+              echo "Jenkins is already installed and running. Skipping installation." 
+
+            fi 
+
+          ' 
+
+ 
+
+    # Step 14: Output Jenkins URL 
+
+    - name: Output Jenkins URL 
+
+      run: | 
+
+        echo "Jenkins is accessible at: http://$VM_IP:8080" 
+
+ 
+
+    # Step 15: Check Jenkins Service Status and Logs 
+
+    - name: Check Jenkins Service Status 
+
+      run: | 
+
+        az vm run-command invoke \ 
+
+          --resource-group jenkinsRG \ 
+
+          --name jenkinsVM \ 
+
+          --command-id RunShellScript \ 
+
+          --scripts ' 
+
+            sudo systemctl status jenkins 
+
+            sudo journalctl -u jenkins 
+
+          ' 
+
+ 
+
+    # Step 16: Verify Jenkins Bound to Port 8080 
+
+    - name: Verify Jenkins Bound to Port 8080 
+
+      run: | 
+
+        az vm run-command invoke \ 
+
+          --resource-group jenkinsRG \ 
+
+          --name jenkinsVM \ 
+
+          --command-id RunShellScript \ 
+
+          --scripts "sudo ss -tuln | grep 8080" 
+
+ 
+
+    # Step 17: Check Effective NSG Rules 
+
+    - name: Check NSG Rules 
+
+      run: az network nic list-effective-nsg --resource-group jenkinsRG --name jenkinsNIC 
+
+ 
+
+    # Step 18: Check Firewall Status on VM 
+
+    - name: Check Firewall on VM 
+
+      run: | 
+
+        az vm run-command invoke \ 
+
+          --resource-group jenkinsRG \ 
+
+          --name jenkinsVM \ 
+
+          --command-id RunShellScript \ 
+
+          --scripts ' 
+
+            sudo ufw status 
+
+            sudo ufw allow 8080 
+
+            sudo ufw reload 
+
+          ' 
+
+ 
+
+    # Step 19: Test Jenkins Locally on VM 
+
+    - name: Test Jenkins Locally 
+
+      run: | 
+
+        az vm run-command invoke \ 
+
+          --resource-group jenkinsRG \ 
+
+          --name jenkinsVM \ 
+
+          --command-id RunShellScript \ 
+
+          --scripts "curl http://localhost:8080" 
