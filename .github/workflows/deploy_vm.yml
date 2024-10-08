@@ -68,41 +68,41 @@ jobs:
           --description "Allow inbound traffic on port 22 for SSH"
 
 # Step 6: Create virtual network and subnet if they don't exist
-      - name: Create virtual network and subnet if they don't exist
-        run: |
-          if ! az network vnet show --resource-group jenkinsRG --name jenkinsVNet > /dev/null 2>&1; then
-            az network vnet create \
-              --resource-group jenkinsRG \
-              --name jenkinsVNet \
-              --address-prefix 10.0.0.0/16 \
-              --subnet-name jenkinsSubnet \
-              --subnet-prefix 10.0.1.0/24
-          else
-            echo "Virtual Network jenkinsVNet already exists. Skipping creation."
-          fi
+    - name: Create virtual network and subnet if they don't exist
+      run: |
+        if ! az network vnet show --resource-group jenkinsRG --name jenkinsVNet > /dev/null 2>&1; then
+          az network vnet create \
+            --resource-group jenkinsRG \
+            --name jenkinsVNet \
+            --address-prefix 10.0.0.0/16 \
+            --subnet-name jenkinsSubnet \
+            --subnet-prefix 10.0.1.0/24
+        else
+          echo "Virtual Network jenkinsVNet already exists. Skipping creation."
+        fi
 
 # Step 7: Create public IP if it doesn't exist
-- name: Create public IP if it doesn't exist
-  run: |
-    if ! az network public-ip show --resource-group jenkinsRG --name jenkinsPublicIP > /dev/null 2>&1; then
-      az network public-ip create \
-        --resource-group jenkinsRG \
-        --name jenkinsPublicIP
-    else
-      echo "Public IP jenkinsPublicIP already exists. Skipping creation."
-    fi
+    - name: Create public IP if it doesn't exist
+      run: |
+        if ! az network public-ip show --resource-group jenkinsRG --name jenkinsPublicIP > /dev/null 2>&1; then
+          az network public-ip create \
+            --resource-group jenkinsRG \
+            --name jenkinsPublicIP
+        else
+          echo "Public IP jenkinsPublicIP already exists. Skipping creation."
+        fi
 
 # Step 8: Create network interface if it doesn't exist
-- name: Create network interface if it doesn't exist
-  run: |
-    if ! az network nic show --resource-group jenkinsRG --name jenkinsNIC > /dev/null 2>&1; then
-      az network nic create \
-        --resource-group jenkinsRG \
-        --vnet-name jenkinsVNet \
-        --subnet jenkinsSubnet \
-        --name jenkinsNIC \
-        --public-ip-address jenkinsPublicIP \
-        --network-security-group jenkinsNSG
-    else
-      echo "Network interface jenkinsNIC already exists. Skipping creation."
-    fi
+    - name: Create network interface if it doesn't exist
+      run: |
+        if ! az network nic show --resource-group jenkinsRG --name jenkinsNIC > /dev/null 2>&1; then
+          az network nic create \
+            --resource-group jenkinsRG \
+            --vnet-name jenkinsVNet \
+            --subnet jenkinsSubnet \
+            --name jenkinsNIC \
+            --public-ip-address jenkinsPublicIP \
+            --network-security-group jenkinsNSG
+        else
+          echo "Network interface jenkinsNIC already exists. Skipping creation."
+        fi
