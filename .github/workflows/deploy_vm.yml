@@ -106,3 +106,70 @@ jobs:
         else
           echo "Network interface jenkinsNIC already exists. Skipping creation."
         fi
+# Step 8: Create network interface if it doesn't exist
+    - name: Create network interface if it doesn't exist
+      run: |
+        if ! az network nic show --resource-group jenkinsRG --name jenkinsNIC > /dev/null 2>&1; then
+          az network nic create \
+            --resource-group jenkinsRG \
+            --vnet-name jenkinsVNet \
+            --subnet jenkinsSubnet \
+            --name jenkinsNIC \
+            --public-ip-address jenkinsPublicIP \
+            --network-security-group jenkinsNSG
+        else
+          echo "Network interface jenkinsNIC already exists. Skipping creation."
+        fi
+
+    # Step 9: Generate SSH keys if not already generated
+    - name: Generate SSH keys if not already generated
+      run: |
+        if [ ! -f ~/.ssh/id_rsa ]; then
+          ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -q -N ""
+          echo "SSH keys generated."
+        else
+          echo "SSH keys already exist. Skipping generation."
+        fi
+      id: generate_ssh_keys
+
+    # Step 9.5: Debug - Output VM username
+    - name: Debug - Output VM username
+      run: echo "The admin username is ${{ secrets.VM_USERNAME }}"
+
+    # Step 10: Deploy the VM with SSH key if it doesn't exist
+    - name: Deploy VM with SSH key if it doesn't exist
+      run: |
+        if ! az vm show --resource-group jenkinsRG --name jenkinsVM > /dev/null 2>&1; then
+          az vm create \
+            --resource-group jenkinsRG \
+            --name jenkinsVM \
+            --nics jenkinsNIC \
+            --image Canonical:0001-com-ubuntu-server-jammy:22_04-lts-gen2:latest \
+            --size Standard_DS1_v2 \
+            --admin-username ${{ secrets.VM_USERNAME }} \
+            --ssh-key-value $HOME/.ssh/id_rsa.pub
+        else
+          echo "VM jenkinsVM already exists. Skipping creation."
+        fi
+
+    # Step 11: Output public IP of the VM
+    - name: Output public IP of the VM
+      run: |
+        VM_IP=$(az vm show -d -g jenkinsRG -n jenkinsVM --query publicIps -o tsv)
+        echo "VM_IP=$VM_IP" >> $GITHUB_ENV
+
+    # Step 12: Configure sudo privileges for the VM user (Skip if already configured)
+    - name: Set up sudo privileges
+      run: |
+        az vm run-command invoke \
+          --resource-group jenkinsRG \
+          --name jenkinsVM \
+          --command-id RunShellScript \
+          --scripts '
+            if [ ! -f /etc/sudoers.d/${{ secrets.VM_USERNAME }} ]; then
+              echo "${{ secrets.VM_USERNAME }} ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/${{ secrets.VM_USERNAME }} > /dev/null
+              echo "Sudo privileges configured for ${{ secrets.VM_USERNAME }}"
+            else
+              echo "Sudo privileges already configured for ${{ secrets.VM_USERNAME }}. Skipping."
+            fi
+          '
